@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #06080f;
+  --color-surface: #0b0f18;
+  --color-card: #10151f;
+  --color-card-hover: #141a26;
+  --color-border: #1d2634;
+  --color-border-strong: #2a3547;
+  --color-foreground: #e7ecf4;
+  --color-muted: #8b95a7;
+  --color-primary: #22d3ee;
+  --color-primary-dim: #0e7490;
+  --color-primary-foreground: #032830;
+  --color-win: #a3e635;
+  --color-loss: #fb7185;
+  --color-gold: #fbbf24;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), var(--font-inter), ui-sans-serif, sans-serif;
+
+  --animate-pulse-glow: pulse-glow 2.4s ease-in-out infinite;
+  --animate-float: float 5s ease-in-out infinite;
+
+  @keyframes pulse-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 24px 0 rgb(34 211 238 / 0.25);
+    }
+    50% {
+      box-shadow: 0 0 48px 6px rgb(34 211 238 / 0.45);
+    }
+  }
+
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle arena grid backdrop used on landing + app shell. */
+.arena-grid {
+  background-image:
+    linear-gradient(rgb(34 211 238 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(34 211 238 / 0.04) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.glass {
+  background: rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+
+.text-glow {
+  text-shadow: 0 0 30px rgb(34 211 238 / 0.55);
+}
+
+/* Mirrored self-view video. */
+.mirrored {
+  transform: scaleX(-1);
+}
+
+::selection {
+  background: rgb(34 211 238 / 0.3);
+}

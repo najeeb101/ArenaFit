@@ -1,0 +1,32 @@
+# Production-parity infrastructure. Local dev currently runs on SQLite
+# (see docs/architecture.md "Dev infrastructure"); once Docker Desktop is
+# installed, start these and point DATABASE_URL / REDIS_URL at them.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: arenafit
+      POSTGRES_PASSWORD: arenafit
+      POSTGRES_DB: arenafit
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arenafit"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

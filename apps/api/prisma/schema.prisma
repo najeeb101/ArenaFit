@@ -1,0 +1,134 @@
+// SQLite for zero-setup local dev; the schema deliberately avoids
+// SQLite-only features so switching the provider to "postgresql" (see
+// docker-compose.yml) only requires regenerating migrations.
+// Enum-like fields are strings validated by types in @arenafit/shared.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String             @id @default(cuid())
+  email         String             @unique
+  username      String             @unique
+  passwordHash  String
+  role          String             @default("USER") // USER | ADMIN
+  createdAt     DateTime           @default(now())
+  profile       Profile?
+  participants  MatchParticipant[]
+  ratingHistory RatingHistory[]
+  achievements  UserAchievement[]
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Profile {
+  userId           String    @id
+  displayName      String
+  country          String    @default("")
+  level            Int       @default(1)
+  xp               Int       @default(0)
+  coins            Int       @default(0)
+  rating           Int       @default(1000)
+  tier             String    @default("BRONZE")
+  wins             Int       @default(0)
+  losses           Int       @default(0)
+  draws            Int       @default(0)
+  winStreak        Int       @default(0)
+  currentStreak    Int       @default(0) // consecutive active days
+  longestStreak    Int       @default(0)
+  lastActivityAt   DateTime?
+  totalReps        Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([rating])
+}
+
+model Match {
+  id           String             @id @default(cuid())
+  exercise     String // ExerciseId
+  mode         String // MatchModeId
+  durationSec  Int
+  targetReps   Int?
+  status       String             @default("PENDING") // PENDING | ACTIVE | COMPLETED | ABANDONED
+  startedAt    DateTime?
+  endedAt      DateTime?
+  createdAt    DateTime           @default(now())
+  participants MatchParticipant[]
+
+  @@index([status, createdAt])
+}
+
+model MatchParticipant {
+  id            String  @id @default(cuid())
+  matchId       String
+  // Null userId = simulated opponent.
+  userId        String?
+  botName       String?
+  botRating     Int?
+  reps          Int     @default(0)
+  result        String? // WIN | LOSS | DRAW
+  ratingBefore  Int?
+  ratingDelta   Int?
+  xpEarned      Int     @default(0)
+  coinsEarned   Int     @default(0)
+  avgConfidence Float?
+  match         Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  user          User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([matchId])
+}
+
+model RatingHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  matchId   String?
+  rating    Int
+  delta     Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model Achievement {
+  id          String            @id // slug, e.g. FIRST_WIN
+  name        String
+  description String
+  icon        String
+  xpReward    Int               @default(0)
+  coinReward  Int               @default(0)
+  sortOrder   Int               @default(0)
+  users       UserAchievement[]
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  achievementId String
+  unlockedAt    DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+}
