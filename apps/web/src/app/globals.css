@@ -17,7 +17,7 @@
   --color-gold: #fbbf24;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-space-grotesk), var(--font-inter), ui-sans-serif, sans-serif;
+  --font-display: var(--font-merriweather), var(--font-inter), ui-sans-serif, sans-serif;
 
   --animate-pulse-glow: pulse-glow 2.4s ease-in-out infinite;
   --animate-float: float 5s ease-in-out infinite;
@@ -25,10 +25,10 @@
   @keyframes pulse-glow {
     0%,
     100% {
-      box-shadow: 0 0 24px 0 rgb(34 211 238 / 0.25);
+      box-shadow: 0 4px 12px 0 rgb(34 211 238 / 0.15);
     }
     50% {
-      box-shadow: 0 0 48px 6px rgb(34 211 238 / 0.45);
+      box-shadow: 0 6px 16px 0 rgb(34 211 238 / 0.2);
     }
   }
 
@@ -57,19 +57,19 @@ body {
 /* Subtle arena grid backdrop used on landing + app shell. */
 .arena-grid {
   background-image:
-    linear-gradient(rgb(34 211 238 / 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(34 211 238 / 0.04) 1px, transparent 1px);
+    linear-gradient(rgb(255 255 255 / 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.02) 1px, transparent 1px);
   background-size: 44px 44px;
 }
 
 .glass {
-  background: rgb(255 255 255 / 0.04);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(255 255 255 / 0.02);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgb(255 255 255 / 0.1);
 }
 
 .text-glow {
-  text-shadow: 0 0 30px rgb(34 211 238 / 0.55);
+  /* removed glow effect */
 }
 
 /* Mirrored self-view video. */

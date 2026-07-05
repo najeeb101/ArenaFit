@@ -67,7 +67,7 @@ export default function LandingPage() {
 
       {/* Hero */}
       <section className="relative mx-auto max-w-6xl px-6 pb-24 pt-16 text-center md:pt-28">
-        <div className="pointer-events-none absolute inset-x-0 top-0 mx-auto h-105 w-105 rounded-full bg-primary/10 blur-[120px]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 mx-auto h-105 w-105 rounded-full bg-primary/5 blur-[100px]" />
         <motion.p
           {...fadeUp}
           className="mx-auto mb-5 w-fit rounded-full border border-primary/30 bg-primary/10 px-4 py-1 text-xs font-semibold tracking-wide text-primary"
