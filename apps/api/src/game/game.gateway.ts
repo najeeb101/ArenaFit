@@ -19,6 +19,11 @@ interface GameSocket extends Socket {
 
 @WebSocketGateway({
   cors: { origin: config().CORS_ORIGIN.split(","), credentials: true },
+  // Tighter than Socket.IO's defaults (25s/20s) so a silently-hung socket
+  // (process frozen, network cut without a clean FIN) is reaped quickly
+  // instead of holding a match's reconnect-grace timer hostage.
+  pingInterval: 10_000,
+  pingTimeout: 5_000,
 })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(GameGateway.name);
@@ -39,7 +44,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.warn(`Rejected unauthenticated socket ${socket.id}`);
       socket.emit("error:game", { message: "Authentication required" });
       socket.disconnect(true);
+      return;
     }
+    this.engine.reconnect(socket, socket.data.userId);
   }
 
   handleDisconnect(socket: GameSocket) {

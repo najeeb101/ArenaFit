@@ -13,7 +13,7 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { ProgressionService } from "../progression/progression.service";
 import { BotPersona, generateBotPersona, generateBotSchedule } from "./bot";
-import { validateRep } from "./rep-validator";
+import { SUSTAINED_WINDOW_SIZE, validateRep } from "./rep-validator";
 
 /**
  * Minimal transport interface the engine needs — satisfied by a Socket.IO
@@ -34,7 +34,8 @@ interface ActiveMatch {
   playerReps: number;
   botReps: number;
   startedAt: number;
-  lastRepAt: number | null;
+  /** Server-clock timestamps of the last few accepted reps, oldest first. */
+  repTimestamps: number[];
   confidenceSum: number;
   bot: BotPersona;
   botSchedule: number[];
@@ -43,9 +44,16 @@ interface ActiveMatch {
   botParticipantId: string;
   ratingBefore: number;
   timers: NodeJS.Timeout[];
+  /** Set while the player's socket is disconnected but within the reconnect grace window. */
+  disconnectedAt: number | null;
+  graceTimer: NodeJS.Timeout | null;
 }
 
 const QUEUE_DELAY_MS = () => 2000 + Math.random() * 6000;
+/** How long a disconnected player has to reconnect before the match is scored as a loss. */
+const RECONNECT_GRACE_MS = 15_000;
+/** How long a player has to hit "ready" after being matched before the match is abandoned. */
+const READY_TIMEOUT_MS = 45_000;
 
 @Injectable()
 export class MatchEngineService {
@@ -128,7 +136,7 @@ export class MatchEngineService {
       playerReps: 0,
       botReps: 0,
       startedAt: 0,
-      lastRepAt: null,
+      repTimestamps: [],
       confidenceSum: 0,
       bot,
       botSchedule: generateBotSchedule(exercise, mode, bot.rating),
@@ -137,6 +145,8 @@ export class MatchEngineService {
       botParticipantId: botParticipant.id,
       ratingBefore: profile.rating,
       timers: [],
+      disconnectedAt: null,
+      graceTimer: null,
     };
     this.matches.set(match.id, active);
     this.byConnection.set(connection.id, match.id);
@@ -149,6 +159,16 @@ export class MatchEngineService {
       targetReps: mode.targetReps,
       opponent: bot,
     });
+
+    // A player stuck on the verify/ready screen (e.g. camera permission
+    // never resolved, tab abandoned) would otherwise hold the match open
+    // in memory forever — nothing else bounds "waiting_ready".
+    active.timers.push(
+      setTimeout(() => {
+        if (active.status !== "waiting_ready") return;
+        void this.end(active, "YOU_LEFT");
+      }, READY_TIMEOUT_MS),
+    );
   }
 
   ready(connectionId: string, matchId: string) {
@@ -224,13 +244,14 @@ export class MatchEngineService {
     }
 
     const now = Date.now();
-    const verdict = validateRep(match.exercise, match.lastRepAt, now, payload.confidence);
+    const verdict = validateRep(match.exercise, match.repTimestamps, now, payload.confidence);
     if (!verdict.accepted) {
       match.connection.emit("rep:rejected", { matchId: match.id, reason: verdict.reason });
       return;
     }
 
-    match.lastRepAt = now;
+    match.repTimestamps.push(now);
+    if (match.repTimestamps.length > SUSTAINED_WINDOW_SIZE) match.repTimestamps.shift();
     match.playerReps++;
     match.confidenceSum += payload.confidence;
     this.emitScore(match);
@@ -249,13 +270,60 @@ export class MatchEngineService {
   handleDisconnect(connectionId: string) {
     this.leaveQueue(connectionId);
     const matchId = this.byConnection.get(connectionId);
+    this.byConnection.delete(connectionId);
     if (!matchId) return;
     const match = this.matches.get(matchId);
-    if (match && match.status !== "ended") {
-      // Persist the loss even though the player is gone.
+    if (!match || match.status === "ended") return;
+
+    // Network blips (wifi handoff, phone lock, tab backgrounding) shouldn't
+    // hand out an instant loss — give the player a window to reconnect
+    // before finalizing the match.
+    match.disconnectedAt = Date.now();
+    match.graceTimer = setTimeout(() => {
+      if (match.status === "ended") return;
       void this.end(match, "YOU_LEFT", { emit: false });
+    }, RECONNECT_GRACE_MS);
+    match.timers.push(match.graceTimer);
+  }
+
+  /**
+   * Called when a newly-authenticated socket connects. If this user has a
+   * match awaiting reconnect within its grace window, rebind it to the new
+   * connection and resync the client. Returns whether a match was resumed.
+   */
+  reconnect(connection: PlayerConnection, userId: string): boolean {
+    for (const match of this.matches.values()) {
+      if (match.userId !== userId || match.status === "ended" || match.disconnectedAt === null) {
+        continue;
+      }
+
+      if (match.graceTimer) clearTimeout(match.graceTimer);
+      match.graceTimer = null;
+      match.disconnectedAt = null;
+      match.connection = connection;
+      this.byConnection.set(connection.id, match.id);
+
+      if (match.status === "active") {
+        connection.emit("match:start", {
+          matchId: match.id,
+          startedAt: match.startedAt,
+          durationSec: match.mode.durationSec,
+          targetReps: match.mode.targetReps,
+        });
+        this.emitScore(match);
+      } else if (match.status === "waiting_ready") {
+        connection.emit("match:found", {
+          matchId: match.id,
+          exercise: match.exercise.id,
+          mode: match.mode.id,
+          durationSec: match.mode.durationSec,
+          targetReps: match.mode.targetReps,
+          opponent: match.bot,
+        });
+      }
+      return true;
     }
-    this.byConnection.delete(connectionId);
+    return false;
   }
 
   private emitScore(match: ActiveMatch) {
