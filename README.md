@@ -44,6 +44,9 @@ opponent scores live.
 | `pnpm test` | Unit tests: rep FSMs, Elo/XP math, bot model, rep validation |
 | `pnpm build` | Production builds |
 | `pnpm db:migrate` / `db:seed` | Prisma migrate / seed |
+| `pnpm lint` / `pnpm typecheck` | Lint / typecheck both apps |
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs lint, typecheck, build, and test on every push/PR to `main`.
 
 ## Repo map
 
