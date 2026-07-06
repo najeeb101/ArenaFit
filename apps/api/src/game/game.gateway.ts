@@ -11,6 +11,7 @@ import type { QueueJoinPayload, RepCompletedPayload, WebRtcSignalPayload } from 
 import type { Socket } from "socket.io";
 import { AuthService } from "../auth/auth.service";
 import { config } from "../config";
+import { PresenceService } from "../presence/presence.service";
 import { MatchEngineService } from "./match-engine.service";
 
 interface GameSocket extends Socket {
@@ -31,6 +32,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly auth: AuthService,
     private readonly engine: MatchEngineService,
+    private readonly presence: PresenceService,
   ) {}
 
   handleConnection(socket: GameSocket) {
@@ -46,10 +48,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       socket.disconnect(true);
       return;
     }
+    this.presence.markOnline(socket.data.userId);
     this.engine.reconnect(socket, socket.data.userId);
   }
 
   handleDisconnect(socket: GameSocket) {
+    if (socket.data.userId) this.presence.markOffline(socket.data.userId);
     this.engine.handleDisconnect(socket.id);
   }
 
@@ -76,6 +80,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage("match:forfeit")
   onForfeit(@ConnectedSocket() socket: GameSocket, @MessageBody() payload: { matchId: string }) {
     this.engine.forfeit(socket.id, payload.matchId);
+  }
+
+  @SubscribeMessage("room:create")
+  onRoomCreate(@ConnectedSocket() socket: GameSocket, @MessageBody() payload: QueueJoinPayload) {
+    this.engine.createRoom(socket, socket.data.userId, payload);
+  }
+
+  @SubscribeMessage("room:join")
+  onRoomJoin(@ConnectedSocket() socket: GameSocket, @MessageBody() payload: { code: string }) {
+    this.engine.joinRoom(socket, socket.data.userId, payload.code);
+  }
+
+  @SubscribeMessage("match:rematch")
+  onRematch(@ConnectedSocket() socket: GameSocket, @MessageBody() payload: { matchId: string }) {
+    this.engine.requestRematch(socket.id, payload.matchId);
   }
 
   @SubscribeMessage("webrtc:offer")

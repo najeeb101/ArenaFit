@@ -19,18 +19,33 @@ function makeConnection(id: string): FakeConnection {
 }
 
 function makeEngine() {
+  let matchCounter = 0;
   const prisma = {
     profile: {
-      findUniqueOrThrow: vi.fn().mockResolvedValue({ rating: 1000 }),
+      findUniqueOrThrow: vi.fn(({ where }: { where: { userId: string } }) =>
+        Promise.resolve({
+          rating: 1000,
+          displayName: `Player-${where.userId}`,
+          tier: "BRONZE",
+          level: 1,
+          country: "US",
+        }),
+      ),
     },
     match: {
-      create: vi.fn().mockResolvedValue({
-        id: "match-1",
-        participants: [
-          { id: "participant-player", userId: "user-1" },
-          { id: "participant-bot", userId: null },
-        ],
-      }),
+      create: vi.fn(
+        ({ data }: { data: { participants: { create: { userId?: string | null }[] } } }) => {
+          matchCounter++;
+          const matchId = `match-${matchCounter}`;
+          return Promise.resolve({
+            id: matchId,
+            participants: data.participants.create.map((p, i) => ({
+              id: `${matchId}-participant-${i}`,
+              userId: p.userId ?? null,
+            })),
+          });
+        },
+      ),
       update: vi.fn().mockResolvedValue({}),
     },
     matchParticipant: { update: vi.fn().mockResolvedValue({}) },
@@ -166,5 +181,164 @@ describe("MatchEngineService WebRTC signal relay", () => {
     expect(() =>
       engine.relaySignal(stranger.id, matchId, "webrtc:offer", { matchId, data: "sdp" }),
     ).not.toThrow();
+  });
+});
+
+/** Creates a private-room match between two humans and returns its matchId. */
+async function createPrivateMatch(
+  engine: MatchEngineService,
+  host: FakeConnection,
+  hostUserId: string,
+  guest: FakeConnection,
+  guestUserId: string,
+) {
+  engine.createRoom(host, hostUserId, { exercise: "SQUAT", mode: "TIMED_30" });
+  const created = host.events.find((e) => e.event === "room:created");
+  const code = (created!.payload as { code: string }).code;
+
+  engine.joinRoom(guest, guestUserId, code);
+  await vi.advanceTimersByTimeAsync(0); // flush the async profile-fetch/match-create chain
+
+  const found = host.events.find((e) => e.event === "match:found");
+  return (found!.payload as { matchId: string }).matchId;
+}
+
+describe("MatchEngineService private rooms", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("creates a real human-vs-human match when a room code is joined", async () => {
+    const { engine } = makeEngine();
+    const host = makeConnection("conn-host");
+    const guest = makeConnection("conn-guest");
+
+    const matchId = await createPrivateMatch(engine, host, "host-1", guest, "guest-1");
+
+    const hostFound = host.events.find((e) => e.event === "match:found")!.payload as {
+      matchId: string;
+      opponent: { userId: string | null };
+    };
+    const guestFound = guest.events.find((e) => e.event === "match:found")!.payload as {
+      matchId: string;
+      opponent: { userId: string | null };
+    };
+    expect(hostFound.matchId).toBe(matchId);
+    expect(guestFound.matchId).toBe(matchId);
+    // Each side sees the OTHER real user as their opponent — not a bot.
+    expect(hostFound.opponent.userId).toBe("guest-1");
+    expect(guestFound.opponent.userId).toBe("host-1");
+  });
+
+  it("rejects joining your own room", async () => {
+    const { engine } = makeEngine();
+    const host = makeConnection("conn-host");
+    engine.createRoom(host, "host-1", { exercise: "SQUAT", mode: "TIMED_30" });
+    const code = (host.events.find((e) => e.event === "room:created")!.payload as { code: string })
+      .code;
+
+    engine.joinRoom(host, "host-1", code);
+    expect(host.events.some((e) => e.event === "error:game")).toBe(true);
+  });
+
+  it("rejects an unknown or expired room code", () => {
+    const { engine } = makeEngine();
+    const guest = makeConnection("conn-guest");
+    engine.joinRoom(guest, "guest-1", "NOPE00");
+    expect(guest.events.some((e) => e.event === "error:game")).toBe(true);
+  });
+
+  it("does not start the countdown until BOTH participants are ready", async () => {
+    const { engine } = makeEngine();
+    const host = makeConnection("conn-host");
+    const guest = makeConnection("conn-guest");
+    const matchId = await createPrivateMatch(engine, host, "host-1", guest, "guest-1");
+
+    engine.ready(host.id, matchId);
+    await vi.advanceTimersByTimeAsync(3_001);
+    expect(host.events.some((e) => e.event === "match:countdown")).toBe(false);
+    expect(host.events.some((e) => e.event === "match:start")).toBe(false);
+
+    engine.ready(guest.id, matchId);
+    await vi.advanceTimersByTimeAsync(3_001);
+    expect(host.events.some((e) => e.event === "match:countdown")).toBe(true);
+    expect(host.events.some((e) => e.event === "match:start")).toBe(true);
+    expect(guest.events.some((e) => e.event === "match:start")).toBe(true);
+  });
+
+  it("tells the other participant OPPONENT_LEFT when one forfeits", async () => {
+    const { engine } = makeEngine();
+    const host = makeConnection("conn-host");
+    const guest = makeConnection("conn-guest");
+    const matchId = await createPrivateMatch(engine, host, "host-1", guest, "guest-1");
+    engine.ready(host.id, matchId);
+    engine.ready(guest.id, matchId);
+    await vi.advanceTimersByTimeAsync(3_001);
+
+    engine.forfeit(host.id, matchId);
+    await vi.advanceTimersByTimeAsync(0); // flush the async progression/DB writes in end()
+
+    const hostEnd = host.events.find((e) => e.event === "match:end")!.payload as {
+      reason: string;
+      you: { outcome: string };
+    };
+    const guestEnd = guest.events.find((e) => e.event === "match:end")!.payload as {
+      reason: string;
+      you: { outcome: string };
+    };
+    expect(hostEnd.reason).toBe("YOU_LEFT");
+    expect(hostEnd.you.outcome).toBe("LOSS");
+    expect(guestEnd.reason).toBe("OPPONENT_LEFT");
+    expect(guestEnd.you.outcome).toBe("WIN");
+  });
+});
+
+describe("MatchEngineService rematch", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("starts a fresh match only once BOTH participants request a rematch", async () => {
+    const { engine } = makeEngine();
+    const host = makeConnection("conn-host");
+    const guest = makeConnection("conn-guest");
+    const matchId = await createPrivateMatch(engine, host, "host-1", guest, "guest-1");
+    engine.ready(host.id, matchId);
+    engine.ready(guest.id, matchId);
+    await vi.advanceTimersByTimeAsync(3_001); // into "active"
+    await vi.advanceTimersByTimeAsync(30_001); // TIME_UP
+    await vi.advanceTimersByTimeAsync(0); // flush the async progression/DB writes in end()
+
+    engine.requestRematch(host.id, matchId);
+    expect(host.events.some((e) => e.event === "match:rematch-pending")).toBe(true);
+    expect(host.events.filter((e) => e.event === "match:found").length).toBe(1); // still just the original
+
+    engine.requestRematch(guest.id, matchId);
+    await vi.advanceTimersByTimeAsync(0); // flush createHumanMatch's async chain
+
+    const rematchFound = host.events.filter((e) => e.event === "match:found")[1].payload as {
+      matchId: string;
+    };
+    expect(rematchFound.matchId).not.toBe(matchId);
+    expect(guest.events.filter((e) => e.event === "match:found").length).toBe(2);
+  });
+
+  it("does not offer a rematch for solo-vs-bot matches", async () => {
+    const { engine } = makeEngine();
+    const connection = makeConnection("conn-1");
+    const matchId = await joinAndFindMatch(engine, connection);
+    await readyAndGoActive(engine, connection, matchId);
+    await vi.advanceTimersByTimeAsync(60_001); // TIME_UP for TIMED_60
+    await vi.advanceTimersByTimeAsync(0); // flush the async progression/DB writes in end()
+
+    engine.requestRematch(connection.id, matchId);
+    expect(connection.events.some((e) => e.event === "match:rematch-pending")).toBe(false);
+    expect(connection.events.filter((e) => e.event === "match:found").length).toBe(1);
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { Flame, Home, Settings, Swords, Trophy, User } from "lucide-react";
+import { Flame, Home, Settings, Swords, Trophy, User, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -13,6 +13,7 @@ const NAV = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/battle", label: "Battle", icon: Swords },
   { href: "/leaderboard", label: "Ranks", icon: Trophy },
+  { href: "/friends", label: "Friends", icon: Users },
   { href: "/profile", label: "Profile", icon: User },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

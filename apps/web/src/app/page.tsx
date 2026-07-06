@@ -42,7 +42,7 @@ const FEATURES = [
   {
     icon: Users,
     title: "Built for rivalry",
-    text: "Rematch instantly, chase your rivals on the leaderboard, and bring friends in private rooms (soon).",
+    text: "Add friends, challenge them directly in a private room, and rematch instantly — no reload, no requeue.",
   },
 ];
 

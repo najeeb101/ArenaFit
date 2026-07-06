@@ -85,3 +85,23 @@ export interface AchievementDto {
   coinReward: number;
   unlockedAt: string | null;
 }
+
+export interface FriendDto {
+  friendshipId: string;
+  userId: string;
+  username: string;
+  displayName: string;
+  country: string;
+  level: number;
+  rating: number;
+  tier: TierId;
+  online: boolean;
+}
+
+export interface FriendRequestDto {
+  id: string;
+  fromUserId: string;
+  username: string;
+  displayName: string;
+  createdAt: string;
+}

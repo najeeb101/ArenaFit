@@ -13,17 +13,33 @@ datasource db {
 }
 
 model User {
-  id            String             @id @default(cuid())
-  email         String             @unique
-  username      String             @unique
-  passwordHash  String
-  role          String             @default("USER") // USER | ADMIN
-  createdAt     DateTime           @default(now())
-  profile       Profile?
-  participants  MatchParticipant[]
-  ratingHistory RatingHistory[]
-  achievements  UserAchievement[]
-  refreshTokens RefreshToken[]
+  id                  String             @id @default(cuid())
+  email               String             @unique
+  username            String             @unique
+  passwordHash        String
+  role                String             @default("USER") // USER | ADMIN
+  createdAt           DateTime           @default(now())
+  profile             Profile?
+  participants        MatchParticipant[]
+  ratingHistory       RatingHistory[]
+  achievements        UserAchievement[]
+  refreshTokens       RefreshToken[]
+  friendshipsSent     Friendship[]       @relation("FriendshipRequester")
+  friendshipsReceived Friendship[]       @relation("FriendshipAddressee")
+}
+
+model Friendship {
+  id          String    @id @default(cuid())
+  requesterId String
+  addresseeId String
+  status      String    @default("PENDING") // PENDING | ACCEPTED
+  createdAt   DateTime  @default(now())
+  respondedAt DateTime?
+  requester   User      @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee   User      @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
 }
 
 model RefreshToken {

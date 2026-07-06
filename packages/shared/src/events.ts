@@ -97,6 +97,11 @@ export interface WebRtcSignalPayload {
   data: unknown;
 }
 
+/** A private-room invite code, shareable so a friend can join directly. */
+export interface RoomCreatedPayload {
+  code: string;
+}
+
 export interface ServerToClientEvents {
   "queue:status": (p: { position: number; elapsedSec: number }) => void;
   "match:found": (p: MatchFoundPayload) => void;
@@ -109,6 +114,9 @@ export interface ServerToClientEvents {
   "webrtc:offer": (p: WebRtcSignalPayload) => void;
   "webrtc:answer": (p: WebRtcSignalPayload) => void;
   "webrtc:ice-candidate": (p: WebRtcSignalPayload) => void;
+  "room:created": (p: RoomCreatedPayload) => void;
+  /** You've requested a rematch; waiting on the other player to also request one. */
+  "match:rematch-pending": (p: { matchId: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -121,4 +129,9 @@ export interface ClientToServerEvents {
   "webrtc:offer": (p: WebRtcSignalPayload) => void;
   "webrtc:answer": (p: WebRtcSignalPayload) => void;
   "webrtc:ice-candidate": (p: WebRtcSignalPayload) => void;
+  /** Create a private-room invite for a friend to join directly (bypasses matchmaking). */
+  "room:create": (p: QueueJoinPayload) => void;
+  "room:join": (p: { code: string }) => void;
+  /** Both participants must send this for the rematch to actually start. */
+  "match:rematch": (p: { matchId: string }) => void;
 }

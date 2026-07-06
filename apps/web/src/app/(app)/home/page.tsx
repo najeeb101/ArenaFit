@@ -11,13 +11,14 @@ import {
   type MatchModeId,
 } from "@arenafit/shared";
 import { motion } from "framer-motion";
-import { Swords } from "lucide-react";
+import { Swords, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { MatchRow } from "@/components/match-row";
 import { TierBadge } from "@/components/tier-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
@@ -30,6 +31,7 @@ export default function HomePage() {
   const [exercise, setExercise] = useState<ExerciseId>("PUSHUP");
   const [mode, setMode] = useState<MatchModeId>("TIMED_60");
   const [history, setHistory] = useState<MatchHistoryItemDto[] | null>(null);
+  const [roomCode, setRoomCode] = useState("");
 
   useEffect(() => {
     api<MatchHistoryItemDto[]>("/users/me/matches?limit=5")
@@ -121,6 +123,46 @@ export default function HomePage() {
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Private match */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-4.5 w-4.5 text-primary" aria-hidden="true" /> Play a friend
+          </CardTitle>
+          <p className="text-sm text-muted">
+            Skip matchmaking — battle someone you know directly.
+          </p>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 sm:flex-row">
+          <Button
+            variant="secondary"
+            className="flex-1"
+            onClick={() => router.push(`/battle?exercise=${exercise}&mode=${mode}&private=create`)}
+          >
+            Create private room
+          </Button>
+          <form
+            className="flex flex-1 gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (roomCode.trim()) router.push(`/battle?private=join&code=${roomCode.trim()}`);
+            }}
+          >
+            <Input
+              value={roomCode}
+              onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+              placeholder="Enter room code"
+              maxLength={6}
+              aria-label="Room code"
+              className="flex-1"
+            />
+            <Button type="submit" variant="secondary" disabled={!roomCode.trim()}>
+              Join
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
       {/* Stats row */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

@@ -7,41 +7,56 @@ import {
   type MatchModeId,
 } from "@arenafit/shared";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Loader2, RefreshCw, Swords, X } from "lucide-react";
+import { ArrowLeft, Check, Copy, Loader2, RefreshCw, Swords, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { TierBadge } from "@/components/tier-badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { useBattle } from "@/hooks/use-battle";
+import { useBattle, type RoomOption } from "@/hooks/use-battle";
 import { usePose, type PoseMode } from "@/hooks/use-pose";
 import { useAuthStore } from "@/lib/auth-store";
 import { useProfileStore } from "@/lib/profile-store";
 import { cn, countryFlag } from "@/lib/utils";
 
 export default function BattlePage() {
+  // Bumping this key fully remounts <Battle>, restarting the join flow
+  // without a hard page reload (used by "queue again" / a failed retry).
+  const [instanceKey, setInstanceKey] = useState(0);
   return (
     <Suspense>
-      <Battle />
+      <Battle key={instanceKey} onRestart={() => setInstanceKey((k) => k + 1)} />
     </Suspense>
   );
 }
 
-function Battle() {
+function Battle({ onRestart }: { onRestart: () => void }) {
   const params = useSearchParams();
   const router = useRouter();
   const exercise = (params.get("exercise") as ExerciseId) || "PUSHUP";
   const mode = (params.get("mode") as MatchModeId) || "TIMED_60";
+  const privateAction = params.get("private");
+  const roomCodeParam = params.get("code");
+  const room: RoomOption | undefined =
+    privateAction === "create"
+      ? { action: "create" }
+      : privateAction === "join" && roomCodeParam
+        ? { action: "join", code: roomCodeParam }
+        : undefined;
 
-  const { state, sendReady, sendRep } = useBattle(exercise, mode);
+  const { state, sendReady, sendRep, sendRematch } = useBattle(exercise, mode, room);
+  // Once matched, the server is authoritative on exercise/mode — matters for
+  // a room-join, where the guest doesn't choose either themselves.
+  const activeExercise = state.match?.exercise ?? exercise;
+  const activeMode = state.match?.mode ?? mode;
   const poseMode: PoseMode =
     state.phase === "verify" || state.phase === "countdown"
       ? "verify"
       : state.phase === "live"
         ? "count"
         : "off";
-  const pose = usePose(exercise, poseMode, sendRep);
+  const pose = usePose(activeExercise, poseMode, sendRep);
   const fetchProfile = useProfileStore((s) => s.fetchProfile);
 
   // Signal readiness exactly once per match after verification passes.
@@ -51,7 +66,7 @@ function Battle() {
       readySentRef.current = true;
       sendReady();
     }
-    if (state.phase === "queue") readySentRef.current = false;
+    if (state.phase === "queue" || state.phase === "room-wait") readySentRef.current = false;
   }, [state.phase, pose.verified, sendReady]);
 
   // Refresh coins/level/rating in the shell after a battle.
@@ -59,9 +74,10 @@ function Battle() {
     if (state.phase === "results") void fetchProfile();
   }, [state.phase, fetchProfile]);
 
-  const exerciseDef = EXERCISES[exercise];
-  const modeDef = MATCH_MODES[mode];
+  const exerciseDef = EXERCISES[activeExercise];
+  const modeDef = MATCH_MODES[activeMode];
   const showCamera = ["verify", "countdown", "live"].includes(state.phase);
+  const isHumanOpponent = state.match ? state.match.opponent.userId !== null : false;
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-background">
@@ -151,8 +167,9 @@ function Battle() {
         {/* Non-camera phases */}
         <AnimatePresence mode="wait">
           {(state.phase === "connecting" || state.phase === "queue") && (
-            <QueueView key="queue" exercise={exercise} mode={mode} />
+            <QueueView key="queue" exercise={activeExercise} mode={activeMode} />
           )}
+          {state.phase === "room-wait" && <RoomWaitView key="room-wait" code={state.roomCode} />}
           {state.phase === "found" && state.match && (
             <FoundView key="found" match={state.match} />
           )}
@@ -161,7 +178,10 @@ function Battle() {
               key="results"
               end={state.end}
               opponentName={state.match?.opponent.displayName ?? "Opponent"}
-              onRematch={() => window.location.reload()}
+              isHumanOpponent={isHumanOpponent}
+              rematchPending={state.rematchPending}
+              onRematch={sendRematch}
+              onRequeue={onRestart}
               onHome={() => router.push("/home")}
             />
           )}
@@ -175,7 +195,7 @@ function Battle() {
               <p role="alert" className="text-lg font-semibold text-loss">
                 {state.error}
               </p>
-              <Button onClick={() => window.location.reload()}>
+              <Button onClick={onRestart}>
                 <RefreshCw className="h-4 w-4" aria-hidden="true" /> Retry
               </Button>
             </motion.div>
@@ -226,6 +246,56 @@ function QueueView({ exercise, mode }: { exercise: ExerciseId; mode: MatchModeId
         </p>
       </div>
       <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
+    </motion.div>
+  );
+}
+
+/* ------------------------------ Private room ------------------------------ */
+
+function RoomWaitView({ code }: { code: string | null }) {
+  const [copied, setCopied] = useState(false);
+
+  async function onCopy() {
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — the code is still visible to copy by hand */
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center"
+    >
+      <h2 className="font-[family-name:var(--font-display)] text-2xl font-bold">
+        Share this code with a friend
+      </h2>
+      {code ? (
+        <button
+          onClick={onCopy}
+          aria-label={`Room code ${code.split("").join(" ")}, click to copy`}
+          className="glass flex items-center gap-3 rounded-2xl px-6 py-4 font-[family-name:var(--font-display)] text-4xl font-bold tracking-[0.3em] text-primary transition-transform active:scale-95"
+        >
+          {code}
+          {copied ? (
+            <Check className="h-6 w-6 text-win" aria-hidden="true" />
+          ) : (
+            <Copy className="h-6 w-6 text-muted" aria-hidden="true" />
+          )}
+        </button>
+      ) : (
+        <Loader2 className="h-6 w-6 animate-spin text-primary" aria-hidden="true" />
+      )}
+      <p role="status" className="flex items-center gap-2 text-sm text-muted">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Waiting for your friend to
+        join…
+      </p>
     </motion.div>
   );
 }
@@ -511,12 +581,18 @@ function LiveHud({
 function ResultsView({
   end,
   opponentName,
+  isHumanOpponent,
+  rematchPending,
   onRematch,
+  onRequeue,
   onHome,
 }: {
   end: NonNullable<ReturnType<typeof useBattle>["state"]["end"]>;
   opponentName: string;
+  isHumanOpponent: boolean;
+  rematchPending: boolean;
   onRematch: () => void;
+  onRequeue: () => void;
   onHome: () => void;
 }) {
   const you = end.you;
@@ -548,7 +624,9 @@ function ResultsView({
       <p className="text-sm text-muted">
         {end.reason === "YOU_LEFT"
           ? "You left the match."
-          : `${you.reps} – ${end.opponentReps} vs ${opponentName}`}
+          : end.reason === "OPPONENT_LEFT"
+            ? `${opponentName} left the match.`
+            : `${you.reps} – ${end.opponentReps} vs ${opponentName}`}
       </p>
 
       <div className="glass w-full max-w-md rounded-2xl p-6">
@@ -611,13 +689,27 @@ function ResultsView({
         </div>
       )}
 
-      <div className="flex gap-3">
-        <Button size="lg" onClick={onRematch}>
-          <RefreshCw className="h-4 w-4" aria-hidden="true" /> Queue again
-        </Button>
-        <Button size="lg" variant="secondary" onClick={onHome}>
-          Home
-        </Button>
+      <div className="flex flex-col items-center gap-2">
+        <div className="flex gap-3">
+          {isHumanOpponent ? (
+            <Button size="lg" onClick={onRematch} disabled={rematchPending}>
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              {rematchPending ? "Waiting for opponent…" : `Rematch ${opponentName}`}
+            </Button>
+          ) : (
+            <Button size="lg" onClick={onRequeue}>
+              <RefreshCw className="h-4 w-4" aria-hidden="true" /> Queue again
+            </Button>
+          )}
+          <Button size="lg" variant="secondary" onClick={onHome}>
+            Home
+          </Button>
+        </div>
+        {isHumanOpponent && rematchPending && (
+          <p role="status" className="text-xs text-muted">
+            Waiting for {opponentName} to also request a rematch…
+          </p>
+        )}
       </div>
       <Link href="/leaderboard" className="text-xs text-muted hover:text-primary">
         See where you rank →

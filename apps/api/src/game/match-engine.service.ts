@@ -13,7 +13,7 @@ import {
   TierId,
 } from "@arenafit/shared";
 import { PrismaService } from "../prisma/prisma.service";
-import { ProgressionService } from "../progression/progression.service";
+import { MatchResultSummary, ProgressionService } from "../progression/progression.service";
 import { generateBotPersona, generateBotSchedule } from "./bot";
 import { SUSTAINED_WINDOW_SIZE, validateRep } from "./rep-validator";
 import { relaySignal } from "./webrtc-relay";
@@ -28,11 +28,9 @@ export interface PlayerConnection {
 }
 
 /**
- * A match has a fixed set of participants — today always exactly one human
- * plus one bot, but modeled generically so a real human-vs-human opponent
- * (M2) is a matter of adding a second HumanParticipant, not rewriting the
- * engine. Outcome derivation below assumes exactly two participants, which
- * holds for every mode in MATCH_MODES today.
+ * A match has a fixed set of participants — solo-vs-bot has one human plus
+ * one bot; a private-room match has two humans. Outcome derivation below
+ * assumes exactly two participants, which holds for every mode today.
  */
 interface ParticipantBase {
   /** MatchParticipant DB row id. */
@@ -46,6 +44,8 @@ interface HumanParticipant extends ParticipantBase {
   kind: "human";
   userId: string;
   connection: PlayerConnection;
+  /** Has this participant sent match:ready? All humans must before countdown starts. */
+  ready: boolean;
   /** Server-clock timestamps of the last few accepted reps, oldest first. */
   repTimestamps: number[];
   confidenceSum: number;
@@ -66,10 +66,6 @@ function isHuman(p: Participant): p is HumanParticipant {
   return p.kind === "human";
 }
 
-function invert(outcome: MatchOutcome): MatchOutcome {
-  return outcome === "WIN" ? "LOSS" : outcome === "LOSS" ? "WIN" : "DRAW";
-}
-
 interface ActiveMatch {
   id: string;
   exercise: ExerciseDef;
@@ -80,11 +76,35 @@ interface ActiveMatch {
   timers: NodeJS.Timeout[];
 }
 
+interface PendingRoom {
+  code: string;
+  hostUserId: string;
+  hostConnection: PlayerConnection;
+  exercise: ExerciseDef;
+  mode: MatchModeDef;
+  expiresTimer: NodeJS.Timeout;
+}
+
+/** A just-finished human-vs-human match, kept briefly so both sides can request a rematch without a page reload. */
+interface RecentMatch {
+  participants: { userId: string; connection: PlayerConnection }[];
+  exercise: ExerciseDef;
+  mode: MatchModeDef;
+  rematchRequestedBy: Set<string>;
+  expiresTimer: NodeJS.Timeout;
+}
+
 const QUEUE_DELAY_MS = () => 2000 + Math.random() * 6000;
 /** How long a disconnected player has to reconnect before the match is scored as a loss. */
 const RECONNECT_GRACE_MS = 15_000;
 /** How long a player has to hit "ready" after being matched before the match is abandoned. */
 const READY_TIMEOUT_MS = 45_000;
+/** How long an unclaimed private-room invite code stays valid. */
+const ROOM_EXPIRY_MS = 5 * 60_000;
+/** How long after a human-vs-human match ends that a rematch can still be requested. */
+const REMATCH_WINDOW_MS = 2 * 60_000;
+/** Avoids visually-ambiguous characters (0/O, 1/I) in shareable room codes. */
+const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 @Injectable()
 export class MatchEngineService {
@@ -95,6 +115,10 @@ export class MatchEngineService {
   private readonly queueTimers = new Map<string, NodeJS.Timeout>();
   /** connectionId -> matchId, for disconnect handling. */
   private readonly byConnection = new Map<string, string>();
+  /** room code -> pending private-match invite. */
+  private readonly pendingRooms = new Map<string, PendingRoom>();
+  /** matchId -> recently-ended human-vs-human match, eligible for rematch. */
+  private readonly recentMatches = new Map<string, RecentMatch>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -113,7 +137,7 @@ export class MatchEngineService {
     connection.emit("queue:status", { position: 1, elapsedSec: 0 });
     const timer = setTimeout(() => {
       this.queueTimers.delete(connection.id);
-      this.createMatch(connection, userId, exercise, mode).catch((err) => {
+      this.createBotMatch(connection, userId, exercise, mode).catch((err) => {
         this.logger.error(`Failed to create match: ${err}`);
         connection.emit("error:game", { message: "Matchmaking failed, please retry" });
       });
@@ -129,7 +153,89 @@ export class MatchEngineService {
     }
   }
 
-  private async createMatch(
+  /** Creates a shareable private-room invite code. Expires unclaimed after 5 minutes. */
+  createRoom(connection: PlayerConnection, userId: string, payload: QueueJoinPayload) {
+    const exercise = EXERCISES[payload.exercise];
+    const mode = MATCH_MODES[payload.mode];
+    if (!exercise || !mode || !isValidPairing(exercise.id, mode.id)) {
+      connection.emit("error:game", { message: "Invalid exercise/mode selection" });
+      return;
+    }
+
+    const code = this.generateRoomCode();
+    const expiresTimer = setTimeout(() => {
+      this.pendingRooms.delete(code);
+      connection.emit("error:game", { message: "Room invite expired — no one joined in time" });
+    }, ROOM_EXPIRY_MS);
+    this.pendingRooms.set(code, { code, hostUserId: userId, hostConnection: connection, exercise, mode, expiresTimer });
+    connection.emit("room:created", { code });
+  }
+
+  /** Joins a private room by its invite code, starting a real human-vs-human match. */
+  joinRoom(connection: PlayerConnection, userId: string, rawCode: string) {
+    const code = rawCode.trim().toUpperCase();
+    const room = this.pendingRooms.get(code);
+    if (!room) {
+      connection.emit("error:game", { message: "Room not found or expired" });
+      return;
+    }
+    if (room.hostUserId === userId) {
+      connection.emit("error:game", { message: "You can't join your own room" });
+      return;
+    }
+    clearTimeout(room.expiresTimer);
+    this.pendingRooms.delete(code);
+
+    this.createHumanMatch(
+      { userId: room.hostUserId, connection: room.hostConnection },
+      { userId, connection },
+      room.exercise,
+      room.mode,
+    ).catch((err) => {
+      this.logger.error(`Failed to create private match: ${err}`);
+      const message = "Could not start the match, please retry";
+      connection.emit("error:game", { message });
+      room.hostConnection.emit("error:game", { message });
+    });
+  }
+
+  /** Both participants of a just-ended human-vs-human match must call this to trigger a rematch. */
+  requestRematch(connectionId: string, matchId: string) {
+    const recent = this.recentMatches.get(matchId);
+    if (!recent) return;
+    const participant = recent.participants.find((p) => p.connection.id === connectionId);
+    if (!participant) return;
+
+    recent.rematchRequestedBy.add(participant.userId);
+    if (recent.rematchRequestedBy.size < recent.participants.length) {
+      participant.connection.emit("match:rematch-pending", { matchId });
+      return;
+    }
+
+    clearTimeout(recent.expiresTimer);
+    this.recentMatches.delete(matchId);
+
+    const [a, b] = recent.participants;
+    this.createHumanMatch(a, b, recent.exercise, recent.mode).catch((err) => {
+      this.logger.error(`Failed to create rematch: ${err}`);
+      for (const p of recent.participants) {
+        p.connection.emit("error:game", { message: "Rematch failed, please retry" });
+      }
+    });
+  }
+
+  private generateRoomCode(): string {
+    let code: string;
+    do {
+      code = Array.from(
+        { length: 6 },
+        () => ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)],
+      ).join("");
+    } while (this.pendingRooms.has(code));
+    return code;
+  }
+
+  private async createBotMatch(
     connection: PlayerConnection,
     userId: string,
     exercise: ExerciseDef,
@@ -157,12 +263,69 @@ export class MatchEngineService {
     const playerRow = match.participants.find((p) => p.userId === userId)!;
     const botRow = match.participants.find((p) => p.userId === null)!;
 
-    const human: HumanParticipant = {
+    const human = this.buildHumanParticipant(playerRow.id, userId, connection, profile);
+    const botParticipant: BotParticipant = {
+      kind: "bot",
+      participantId: botRow.id,
+      reps: 0,
+      schedule: generateBotSchedule(exercise, mode, bot.rating),
+      cursor: 0,
+      summary: bot,
+    };
+
+    this.registerMatch(match.id, exercise, mode, [human, botParticipant]);
+  }
+
+  /** Shared by private-room joins and rematches — a real match between two known users. */
+  private async createHumanMatch(
+    a: { userId: string; connection: PlayerConnection },
+    b: { userId: string; connection: PlayerConnection },
+    exercise: ExerciseDef,
+    mode: MatchModeDef,
+  ) {
+    const [profileA, profileB] = await Promise.all([
+      this.prisma.profile.findUniqueOrThrow({ where: { userId: a.userId } }),
+      this.prisma.profile.findUniqueOrThrow({ where: { userId: b.userId } }),
+    ]);
+
+    const match = await this.prisma.match.create({
+      data: {
+        exercise: exercise.id,
+        mode: mode.id,
+        durationSec: mode.durationSec,
+        targetReps: mode.targetReps,
+        participants: {
+          create: [
+            { userId: a.userId, ratingBefore: profileA.rating },
+            { userId: b.userId, ratingBefore: profileB.rating },
+          ],
+        },
+      },
+      include: { participants: true },
+    });
+
+    const rowA = match.participants.find((p) => p.userId === a.userId)!;
+    const rowB = match.participants.find((p) => p.userId === b.userId)!;
+
+    const humanA = this.buildHumanParticipant(rowA.id, a.userId, a.connection, profileA);
+    const humanB = this.buildHumanParticipant(rowB.id, b.userId, b.connection, profileB);
+
+    this.registerMatch(match.id, exercise, mode, [humanA, humanB]);
+  }
+
+  private buildHumanParticipant(
+    participantId: string,
+    userId: string,
+    connection: PlayerConnection,
+    profile: { rating: number; displayName: string; tier: string; level: number; country: string },
+  ): HumanParticipant {
+    return {
       kind: "human",
-      participantId: playerRow.id,
+      participantId,
       reps: 0,
       userId,
       connection,
+      ready: false,
       repTimestamps: [],
       confidenceSum: 0,
       disconnectedAt: null,
@@ -176,36 +339,37 @@ export class MatchEngineService {
         country: profile.country,
       },
     };
+  }
 
-    const botParticipant: BotParticipant = {
-      kind: "bot",
-      participantId: botRow.id,
-      reps: 0,
-      schedule: generateBotSchedule(exercise, mode, bot.rating),
-      cursor: 0,
-      summary: bot,
-    };
-
+  private registerMatch(
+    matchId: string,
+    exercise: ExerciseDef,
+    mode: MatchModeDef,
+    participants: Participant[],
+  ) {
     const active: ActiveMatch = {
-      id: match.id,
+      id: matchId,
       exercise,
       mode,
       status: "waiting_ready",
       startedAt: 0,
-      participants: [human, botParticipant],
+      participants,
       timers: [],
     };
-    this.matches.set(match.id, active);
-    this.byConnection.set(connection.id, match.id);
+    this.matches.set(matchId, active);
 
-    connection.emit("match:found", {
-      matchId: match.id,
-      exercise: exercise.id,
-      mode: mode.id,
-      durationSec: mode.durationSec,
-      targetReps: mode.targetReps,
-      opponent: this.opponentSummaryFor(active, human),
-    });
+    for (const p of participants) {
+      if (!isHuman(p)) continue;
+      this.byConnection.set(p.connection.id, matchId);
+      p.connection.emit("match:found", {
+        matchId,
+        exercise: exercise.id,
+        mode: mode.id,
+        durationSec: mode.durationSec,
+        targetReps: mode.targetReps,
+        opponent: this.opponentSummaryFor(active, p),
+      });
+    }
 
     // A player stuck on the verify/ready screen (e.g. camera permission
     // never resolved, tab abandoned) would otherwise hold the match open
@@ -222,7 +386,11 @@ export class MatchEngineService {
     const match = this.matches.get(matchId);
     if (!match || match.status !== "waiting_ready") return;
     const human = this.findHuman(match, connectionId);
-    if (!human) return;
+    if (!human || human.ready) return;
+    human.ready = true;
+
+    const allReady = match.participants.filter(isHuman).every((p) => p.ready);
+    if (!allReady) return;
 
     match.status = "countdown";
     for (const value of [3, 2, 1]) {
@@ -318,7 +486,7 @@ export class MatchEngineService {
     const match = this.matches.get(matchId);
     const human = match ? this.findHuman(match, connectionId) : undefined;
     if (!match || !human || match.status === "ended") return;
-    void this.end(match, "YOU_LEFT");
+    void this.end(match, "YOU_LEFT", { leaver: human });
   }
 
   handleDisconnect(connectionId: string) {
@@ -337,7 +505,7 @@ export class MatchEngineService {
     human.disconnectedAt = Date.now();
     human.graceTimer = setTimeout(() => {
       if (match.status === "ended") return;
-      void this.end(match, "YOU_LEFT", { emit: false });
+      void this.end(match, "YOU_LEFT", { emit: false, leaver: human });
     }, RECONNECT_GRACE_MS);
     match.timers.push(human.graceTimer);
   }
@@ -391,9 +559,8 @@ export class MatchEngineService {
 
   /**
    * Relays a WebRTC offer/answer/ICE-candidate to the other human
-   * participant(s) in the match. A no-op today — every match is solo-vs-bot,
-   * so there's no other human to signal to — but wired up so real
-   * human-vs-human matches (M2) light this up without gateway changes.
+   * participant(s) in the match. A no-op in solo-vs-bot matches — there's
+   * no other human to signal to.
    */
   relaySignal(connectionId: string, matchId: string, event: string, payload: unknown) {
     const match = this.matches.get(matchId);
@@ -444,10 +611,25 @@ export class MatchEngineService {
     }
   }
 
+  /** Keeps a human-vs-human match around briefly so both sides can request a rematch. */
+  private storeRecentMatch(match: ActiveMatch) {
+    const humans = match.participants.filter(isHuman);
+    if (humans.length !== match.participants.length || humans.length !== 2) return;
+
+    const expiresTimer = setTimeout(() => this.recentMatches.delete(match.id), REMATCH_WINDOW_MS);
+    this.recentMatches.set(match.id, {
+      participants: humans.map((p) => ({ userId: p.userId, connection: p.connection })),
+      exercise: match.exercise,
+      mode: match.mode,
+      rematchRequestedBy: new Set(),
+      expiresTimer,
+    });
+  }
+
   private async end(
     match: ActiveMatch,
     reason: MatchEndPayload["reason"],
-    options: { emit?: boolean } = {},
+    options: { emit?: boolean; leaver?: HumanParticipant } = {},
   ) {
     if (match.status === "ended") return;
     match.status = "ended";
@@ -457,83 +639,103 @@ export class MatchEngineService {
     for (const p of match.participants) {
       if (isHuman(p)) this.byConnection.delete(p.connection.id);
     }
+    this.storeRecentMatch(match);
 
-    // Every mode today is exactly 2 participants, so there's exactly one
-    // human whose outcome drives everyone else's (inverted). Revisit once
-    // true multi-human matches exist.
-    const human = match.participants.find(isHuman);
-    if (!human) return;
+    const humans = match.participants.filter(isHuman);
+    if (humans.length === 0) return;
 
-    let outcome: MatchOutcome;
-    if (reason === "YOU_LEFT") {
-      outcome = "LOSS";
-    } else {
-      const opponentReps = this.opponentRepsFor(match, human);
-      outcome = human.reps > opponentReps ? "WIN" : human.reps < opponentReps ? "LOSS" : "DRAW";
+    // A participant's own outcome; "YOU_LEFT" with no specific leaver (e.g.
+    // a ready-timeout nobody can be pinned on) forces everyone to LOSS,
+    // matching pre-multi-human behavior.
+    function outcomeFor(p: Participant): MatchOutcome {
+      if (reason === "YOU_LEFT") {
+        if (!options.leaver) return "LOSS";
+        return p === options.leaver ? "LOSS" : "WIN";
+      }
+      const opponentReps = match.participants
+        .filter((x) => x !== p)
+        .reduce((sum, x) => sum + x.reps, 0);
+      return p.reps > opponentReps ? "WIN" : p.reps < opponentReps ? "LOSS" : "DRAW";
     }
 
-    const avgConfidence = human.reps > 0 ? human.confidenceSum / human.reps : null;
+    const matchStatus = reason === "YOU_LEFT" ? "ABANDONED" : "COMPLETED";
+    const summaries = new Map<HumanParticipant, MatchResultSummary>();
 
     try {
-      const summary = await this.progression.applyMatchResult({
-        userId: human.userId,
-        matchId: match.id,
-        exercise: match.exercise.id,
-        outcome,
-        reps: human.reps,
-        opponentRating: this.opponentSummaryFor(match, human).rating,
-        avgConfidence,
-      });
-
-      const participantUpdates = match.participants.map((p) => {
-        if (p === human) {
-          return this.prisma.matchParticipant.update({
-            where: { id: p.participantId },
-            data: {
-              reps: p.reps,
-              result: outcome,
-              ratingBefore: summary.ratingBefore,
-              ratingDelta: summary.ratingDelta,
-              xpEarned: summary.xpEarned,
-              coinsEarned: summary.coinsEarned,
-              avgConfidence,
-            },
+      const dbUpdates = [];
+      for (const p of match.participants) {
+        const outcome = outcomeFor(p);
+        if (isHuman(p)) {
+          const avgConfidence = p.reps > 0 ? p.confidenceSum / p.reps : null;
+          const summary = await this.progression.applyMatchResult({
+            userId: p.userId,
+            matchId: match.id,
+            exercise: match.exercise.id,
+            outcome,
+            reps: p.reps,
+            opponentRating: this.opponentSummaryFor(match, p).rating,
+            avgConfidence,
           });
+          summaries.set(p, summary);
+          dbUpdates.push(
+            this.prisma.matchParticipant.update({
+              where: { id: p.participantId },
+              data: {
+                reps: p.reps,
+                result: outcome,
+                ratingBefore: summary.ratingBefore,
+                ratingDelta: summary.ratingDelta,
+                xpEarned: summary.xpEarned,
+                coinsEarned: summary.coinsEarned,
+                avgConfidence,
+              },
+            }),
+          );
+        } else {
+          dbUpdates.push(
+            this.prisma.matchParticipant.update({
+              where: { id: p.participantId },
+              data: { reps: p.reps, result: outcome },
+            }),
+          );
         }
-        return this.prisma.matchParticipant.update({
-          where: { id: p.participantId },
-          data: { reps: p.reps, result: invert(outcome) },
-        });
-      });
+      }
 
       await this.prisma.$transaction([
         this.prisma.match.update({
           where: { id: match.id },
           data: {
-            status: reason === "YOU_LEFT" ? "ABANDONED" : "COMPLETED",
+            status: matchStatus,
             endedAt: new Date(),
             startedAt: match.startedAt ? new Date(match.startedAt) : null,
           },
         }),
-        ...participantUpdates,
+        ...dbUpdates,
       ]);
 
-      if (options.emit !== false) {
-        human.connection.emit("match:end", {
+      for (const p of humans) {
+        if (options.emit === false && p === options.leaver) continue;
+        const summary = summaries.get(p)!;
+        const personalReason: MatchEndPayload["reason"] =
+          reason === "YOU_LEFT" && options.leaver && p !== options.leaver
+            ? "OPPONENT_LEFT"
+            : reason;
+        p.connection.emit("match:end", {
           matchId: match.id,
-          reason,
-          opponentReps: this.opponentRepsFor(match, human),
+          reason: personalReason,
+          opponentReps: this.opponentRepsFor(match, p),
           you: {
-            reps: human.reps,
-            outcome,
+            reps: p.reps,
+            outcome: outcomeFor(p),
             ...summary,
           },
         } satisfies MatchEndPayload);
       }
     } catch (err) {
       this.logger.error(`Failed to finalize match ${match.id}: ${err}`);
-      if (options.emit !== false) {
-        human.connection.emit("error:game", { message: "Failed to save match result" });
+      for (const p of humans) {
+        if (options.emit === false && p === options.leaver) continue;
+        p.connection.emit("error:game", { message: "Failed to save match result" });
       }
     }
   }
