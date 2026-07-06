@@ -138,3 +138,33 @@ describe("MatchEngineService disconnect handling", () => {
     expect(connection.events.some((e) => e.event === "match:end")).toBe(true);
   });
 });
+
+describe("MatchEngineService WebRTC signal relay", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is a no-op in today's solo-vs-bot matches — there's no other human to relay to", async () => {
+    const { engine } = makeEngine();
+    const connection = makeConnection("conn-1");
+    const matchId = await joinAndFindMatch(engine, connection);
+
+    // Should not throw, and should not somehow echo the signal back to the sender.
+    engine.relaySignal(connection.id, matchId, "webrtc:offer", { matchId, data: "sdp" });
+    expect(connection.events.some((e) => e.event === "webrtc:offer")).toBe(false);
+  });
+
+  it("ignores signals from a connection that isn't a participant in the match", async () => {
+    const { engine } = makeEngine();
+    const connection = makeConnection("conn-1");
+    const matchId = await joinAndFindMatch(engine, connection);
+
+    const stranger = makeConnection("conn-stranger");
+    expect(() =>
+      engine.relaySignal(stranger.id, matchId, "webrtc:offer", { matchId, data: "sdp" }),
+    ).not.toThrow();
+  });
+});

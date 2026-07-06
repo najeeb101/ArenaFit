@@ -7,7 +7,7 @@ import {
   SubscribeMessage,
   WebSocketGateway,
 } from "@nestjs/websockets";
-import type { QueueJoinPayload, RepCompletedPayload } from "@arenafit/shared";
+import type { QueueJoinPayload, RepCompletedPayload, WebRtcSignalPayload } from "@arenafit/shared";
 import type { Socket } from "socket.io";
 import { AuthService } from "../auth/auth.service";
 import { config } from "../config";
@@ -76,5 +76,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage("match:forfeit")
   onForfeit(@ConnectedSocket() socket: GameSocket, @MessageBody() payload: { matchId: string }) {
     this.engine.forfeit(socket.id, payload.matchId);
+  }
+
+  @SubscribeMessage("webrtc:offer")
+  onWebrtcOffer(@ConnectedSocket() socket: GameSocket, @MessageBody() payload: WebRtcSignalPayload) {
+    this.engine.relaySignal(socket.id, payload.matchId, "webrtc:offer", payload);
+  }
+
+  @SubscribeMessage("webrtc:answer")
+  onWebrtcAnswer(@ConnectedSocket() socket: GameSocket, @MessageBody() payload: WebRtcSignalPayload) {
+    this.engine.relaySignal(socket.id, payload.matchId, "webrtc:answer", payload);
+  }
+
+  @SubscribeMessage("webrtc:ice-candidate")
+  onWebrtcIceCandidate(
+    @ConnectedSocket() socket: GameSocket,
+    @MessageBody() payload: WebRtcSignalPayload,
+  ) {
+    this.engine.relaySignal(socket.id, payload.matchId, "webrtc:ice-candidate", payload);
   }
 }

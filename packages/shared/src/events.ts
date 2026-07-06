@@ -86,6 +86,17 @@ export interface MatchStartPayload {
   targetReps: number | null;
 }
 
+/**
+ * WebRTC signaling relay — groundwork for M2 human-vs-human video. The
+ * server never inspects `data`; it's opaque SDP (offer/answer) or an ICE
+ * candidate, relayed verbatim to the other participant(s) in the match.
+ * Unused while every match is solo-vs-bot (no second peer to signal to).
+ */
+export interface WebRtcSignalPayload {
+  matchId: string;
+  data: unknown;
+}
+
 export interface ServerToClientEvents {
   "queue:status": (p: { position: number; elapsedSec: number }) => void;
   "match:found": (p: MatchFoundPayload) => void;
@@ -95,6 +106,9 @@ export interface ServerToClientEvents {
   "rep:rejected": (p: RepRejectedPayload) => void;
   "match:end": (p: MatchEndPayload) => void;
   "error:game": (p: { message: string }) => void;
+  "webrtc:offer": (p: WebRtcSignalPayload) => void;
+  "webrtc:answer": (p: WebRtcSignalPayload) => void;
+  "webrtc:ice-candidate": (p: WebRtcSignalPayload) => void;
 }
 
 export interface ClientToServerEvents {
@@ -104,4 +118,7 @@ export interface ClientToServerEvents {
   "match:ready": (p: { matchId: string }) => void;
   "rep:completed": (p: RepCompletedPayload) => void;
   "match:forfeit": (p: { matchId: string }) => void;
+  "webrtc:offer": (p: WebRtcSignalPayload) => void;
+  "webrtc:answer": (p: WebRtcSignalPayload) => void;
+  "webrtc:ice-candidate": (p: WebRtcSignalPayload) => void;
 }
