@@ -95,7 +95,11 @@ export default function RegisterPage() {
               />
               <p className="text-xs text-muted/70">At least 8 characters.</p>
             </div>
-            {error && <p className="text-sm text-loss">{error}</p>}
+            {error && (
+              <p role="alert" className="text-sm text-loss">
+                {error}
+              </p>
+            )}
             <Button type="submit" size="lg" disabled={loading} className="mt-2">
               {loading ? "Creating…" : "Enter the Arena"}
             </Button>

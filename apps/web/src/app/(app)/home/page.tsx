@@ -60,13 +60,14 @@ export default function HomePage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+              <p id="exercise-label" className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
                 Exercise
               </p>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div role="group" aria-labelledby="exercise-label" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {EXERCISE_IDS.map((id) => (
                   <button
                     key={id}
+                    aria-pressed={exercise === id}
                     onClick={() => setExercise(id)}
                     className={cn(
                       "rounded-xl border p-3 text-left transition-all",
@@ -75,23 +76,26 @@ export default function HomePage() {
                         : "border-border bg-surface hover:border-border-strong",
                     )}
                   >
-                    <span className="text-xl">{EXERCISES[id].icon}</span>
+                    <span aria-hidden="true" className="text-xl">
+                      {EXERCISES[id].icon}
+                    </span>
                     <p className="mt-1 text-sm font-semibold">{EXERCISES[id].name}</p>
                   </button>
                 ))}
               </div>
             </div>
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+              <p id="mode-label" className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
                 Mode
               </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div role="group" aria-labelledby="mode-label" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {MATCH_MODE_IDS.map((id) => {
                   const disabled = !isValidPairing(exercise, id);
                   return (
                     <button
                       key={id}
                       disabled={disabled}
+                      aria-pressed={mode === id}
                       onClick={() => setMode(id)}
                       className={cn(
                         "rounded-xl border p-3 text-left transition-all disabled:opacity-30",
@@ -112,14 +116,14 @@ export default function HomePage() {
               className="w-full animate-pulse-glow sm:w-auto"
               onClick={() => router.push(`/battle?exercise=${exercise}&mode=${mode}`)}
             >
-              <Swords className="h-5 w-5" /> Find Match
+              <Swords className="h-5 w-5" aria-hidden="true" /> Find Match
             </Button>
           </CardContent>
         </Card>
       </motion.div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {profile ? (
           <>
             <StatCard label="Rating">
@@ -146,6 +150,7 @@ export default function HomePage() {
             <StatCard label={`Level ${profile.level}`}>
               <Progress
                 value={(profile.xpIntoLevel / profile.xpForNextLevel) * 100}
+                aria-label={`Level ${profile.level} progress`}
                 className="mt-2"
               />
               <p className="mt-1.5 text-xs text-muted">

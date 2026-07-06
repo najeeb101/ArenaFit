@@ -69,9 +69,16 @@ function Battle() {
       <div className="flex items-center justify-between px-4 py-3">
         <button
           onClick={() => router.push("/home")}
+          aria-label={
+            state.phase === "results" ? "Back home" : state.phase === "live" ? "Forfeit match" : "Leave queue"
+          }
           className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted hover:bg-white/5 hover:text-foreground"
         >
-          {state.phase === "results" ? <ArrowLeft className="h-4 w-4" /> : <X className="h-4 w-4" />}
+          {state.phase === "results" ? (
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <X className="h-4 w-4" aria-hidden="true" />
+          )}
           {state.phase === "results" ? "Back home" : state.phase === "live" ? "Forfeit" : "Leave"}
         </button>
         <div className="text-sm font-semibold text-muted">
@@ -88,10 +95,12 @@ function Battle() {
               ref={pose.videoRef}
               playsInline
               muted
+              aria-hidden="true"
               className="mirrored absolute inset-0 h-full w-full object-cover"
             />
             <canvas
               ref={pose.canvasRef}
+              aria-hidden="true"
               className="absolute inset-0 h-full w-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-background/60" />
@@ -108,12 +117,16 @@ function Battle() {
             )}
 
             {state.phase === "countdown" && state.countdownValue !== null && (
-              <div className="absolute inset-0 flex items-center justify-center">
+              <div
+                role="status"
+                aria-live="assertive"
+                className="absolute inset-0 flex items-center justify-center"
+              >
                 <motion.span
                   key={state.countdownValue}
                   initial={{ scale: 2.4, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  className="font-[family-name:var(--font-display)] text-9xl font-bold text-primary text-glow"
+                  className="font-[family-name:var(--font-display)] text-7xl font-bold text-primary text-glow sm:text-8xl md:text-9xl"
                 >
                   {state.countdownValue}
                 </motion.span>
@@ -159,9 +172,11 @@ function Battle() {
               animate={{ opacity: 1 }}
               className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
             >
-              <p className="text-lg font-semibold text-loss">{state.error}</p>
+              <p role="alert" className="text-lg font-semibold text-loss">
+                {state.error}
+              </p>
               <Button onClick={() => window.location.reload()}>
-                <RefreshCw className="h-4 w-4" /> Retry
+                <RefreshCw className="h-4 w-4" aria-hidden="true" /> Retry
               </Button>
             </motion.div>
           )}
@@ -200,7 +215,7 @@ function QueueView({ exercise, mode }: { exercise: ExerciseId; mode: MatchModeId
           {EXERCISES[exercise].icon}
         </div>
       </div>
-      <div className="text-center">
+      <div role="status" className="text-center">
         <h2 className="font-[family-name:var(--font-display)] text-2xl font-bold">
           Searching for an opponent…
         </h2>
@@ -210,7 +225,7 @@ function QueueView({ exercise, mode }: { exercise: ExerciseId; mode: MatchModeId
           {String(elapsed % 60).padStart(2, "0")}
         </p>
       </div>
-      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+      <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
     </motion.div>
   );
 }
@@ -281,7 +296,10 @@ function PlayerCard({
       transition={{ type: "spring", stiffness: 200, damping: 20 }}
       className="glass flex flex-1 flex-col items-center gap-2 rounded-2xl p-5 text-center"
     >
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-2xl font-bold text-primary">
+      <div
+        aria-hidden="true"
+        className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/15 text-2xl font-bold text-primary"
+      >
         {name[0]?.toUpperCase()}
       </div>
       <p className="max-w-full truncate font-semibold">
@@ -313,14 +331,19 @@ function VerifyOverlay({
   setup: string;
 }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-10">
+    <div
+      role="status"
+      aria-live="polite"
+      className="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-10"
+    >
       {cameraState === "starting" && (
         <div className="glass flex items-center gap-2 rounded-xl px-4 py-3 text-sm">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" /> Starting camera & AI referee…
+          <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" /> Starting
+          camera & AI referee…
         </div>
       )}
       {cameraState === "error" && (
-        <div className="glass max-w-sm rounded-xl px-4 py-3 text-center text-sm text-loss">
+        <div role="alert" className="glass max-w-sm rounded-xl px-4 py-3 text-center text-sm text-loss">
           {cameraError}
         </div>
       )}
@@ -339,7 +362,7 @@ function VerifyOverlay({
                 <p className="mb-2 text-sm font-semibold">
                   {feedback ?? "Hold still — verifying your pose"}
                 </p>
-                <Progress value={progress * 100} />
+                <Progress value={progress * 100} aria-label="Pose verification progress" />
               </>
             )}
           </div>
@@ -386,7 +409,11 @@ function LiveHud({
       <div className="px-4 pt-2">
         <div className="mx-auto max-w-xl">
           <div className="mb-1 flex items-baseline justify-between">
-            <span className="font-[family-name:var(--font-display)] text-2xl font-bold tabular-nums">
+            <span
+              role="timer"
+              aria-label={`${Math.ceil(remaining)} seconds remaining`}
+              className="font-[family-name:var(--font-display)] text-2xl font-bold tabular-nums"
+            >
               {Math.ceil(remaining)}s
             </span>
             {targetReps && (
@@ -395,6 +422,7 @@ function LiveHud({
           </div>
           <Progress
             value={timePct}
+            aria-label="Time remaining"
             indicatorClassName={cn(remaining < 10 && "bg-loss")}
           />
         </div>
@@ -402,60 +430,73 @@ function LiveHud({
 
       {/* Feedback + scores */}
       <div className="flex flex-col items-center gap-4 pb-8">
-        <AnimatePresence>
-          {feedback && (
-            <motion.div
-              key={feedback}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="glass rounded-xl px-4 py-2 text-sm font-semibold text-gold"
-            >
-              {feedback}
-            </motion.div>
-          )}
-          {repRejected && (
-            <motion.div
-              key="rejected"
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              className="rounded-xl bg-loss/20 px-4 py-2 text-sm font-bold text-loss"
-            >
-              Rep rejected
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div role="status" aria-live="polite" className="contents">
+          <AnimatePresence>
+            {feedback && (
+              <motion.div
+                key={feedback}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="glass rounded-xl px-4 py-2 text-sm font-semibold text-gold"
+              >
+                {feedback}
+              </motion.div>
+            )}
+            {repRejected && (
+              <motion.div
+                key="rejected"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0 }}
+                className="rounded-xl bg-loss/20 px-4 py-2 text-sm font-bold text-loss"
+              >
+                Rep rejected
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
-        <div className="flex w-full max-w-xl items-end justify-between px-6">
+        <div
+          role="group"
+          aria-label={`Score: you ${you}, ${opponentName} ${opponent}`}
+          className="flex w-full max-w-xl items-end justify-between px-6"
+        >
           <div className="text-center">
             <motion.p
               key={you}
               initial={{ scale: 1.35 }}
               animate={{ scale: 1 }}
+              aria-hidden="true"
               className={cn(
-                "font-[family-name:var(--font-display)] text-7xl font-bold tabular-nums",
+                "font-[family-name:var(--font-display)] text-5xl font-bold tabular-nums sm:text-6xl md:text-7xl",
                 leading ? "text-win" : "text-foreground",
               )}
             >
               {you}
             </motion.p>
-            <p className="mt-1 text-xs font-bold uppercase tracking-wider text-primary">You</p>
+            <p aria-hidden="true" className="mt-1 text-xs font-bold uppercase tracking-wider text-primary">
+              You
+            </p>
           </div>
-          <Swords className="mb-8 h-6 w-6 text-muted/40" />
+          <Swords className="mb-8 h-6 w-6 text-muted/40" aria-hidden="true" />
           <div className="text-center">
             <motion.p
               key={opponent}
               initial={{ scale: 1.35 }}
               animate={{ scale: 1 }}
+              aria-hidden="true"
               className={cn(
-                "font-[family-name:var(--font-display)] text-7xl font-bold tabular-nums",
+                "font-[family-name:var(--font-display)] text-5xl font-bold tabular-nums sm:text-6xl md:text-7xl",
                 opponent > you ? "text-loss" : "text-foreground",
               )}
             >
               {opponent}
             </motion.p>
-            <p className="mt-1 max-w-24 truncate text-xs font-bold uppercase tracking-wider text-muted">
+            <p
+              aria-hidden="true"
+              className="mt-1 max-w-24 truncate text-xs font-bold uppercase tracking-wider text-muted"
+            >
               {opponentName}
             </p>
           </div>
@@ -489,6 +530,7 @@ function ResultsView({
       className="flex flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-6 py-8"
     >
       <motion.h1
+        role="status"
         initial={{ scale: 0.6, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: "spring", stiffness: 200, damping: 16 }}
@@ -547,29 +589,31 @@ function ResultsView({
           <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wider text-muted">
             Achievements unlocked
           </p>
-          <div className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-2">
             {you.unlockedAchievements.map((a, i) => (
-              <motion.div
+              <motion.li
                 key={a.id}
                 initial={{ opacity: 0, x: -16 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.5 + i * 0.15 }}
                 className="glass flex items-center gap-3 rounded-xl px-4 py-3"
               >
-                <span className="text-2xl">{a.icon}</span>
+                <span aria-hidden="true" className="text-2xl">
+                  {a.icon}
+                </span>
                 <div>
                   <p className="text-sm font-bold text-gold">{a.name}</p>
                   <p className="text-xs text-muted">{a.description}</p>
                 </div>
-              </motion.div>
+              </motion.li>
             ))}
-          </div>
+          </ul>
         </div>
       )}
 
       <div className="flex gap-3">
         <Button size="lg" onClick={onRematch}>
-          <RefreshCw className="h-4 w-4" /> Queue again
+          <RefreshCw className="h-4 w-4" aria-hidden="true" /> Queue again
         </Button>
         <Button size="lg" variant="secondary" onClick={onHome}>
           Home

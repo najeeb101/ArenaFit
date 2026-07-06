@@ -98,8 +98,16 @@ export default function SettingsPage() {
               />
               <p className="text-xs text-muted/70">Two-letter code, shown as a flag (e.g. US, DE, JP).</p>
             </div>
-            {error && <p className="text-sm text-loss">{error}</p>}
-            {saved && <p className="text-sm text-win">Saved ✓</p>}
+            {error && (
+              <p role="alert" className="text-sm text-loss">
+                {error}
+              </p>
+            )}
+            {saved && (
+              <p role="status" className="text-sm text-win">
+                Saved ✓
+              </p>
+            )}
             <Button type="submit" disabled={saving} className="self-start">
               {saving ? "Saving…" : "Save changes"}
             </Button>
@@ -123,7 +131,7 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent>
           <Button variant="danger" onClick={onLogout}>
-            <LogOut className="h-4 w-4" /> Log out
+            <LogOut className="h-4 w-4" aria-hidden="true" /> Log out
           </Button>
         </CardContent>
       </Card>

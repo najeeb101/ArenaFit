@@ -53,7 +53,10 @@ export default function ProfilePage() {
           <div className="pointer-events-none absolute -left-20 -top-20 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
           <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
             <div className="relative">
-              <div className="flex h-24 w-24 items-center justify-center rounded-full bg-primary/15 font-[family-name:var(--font-display)] text-4xl font-bold text-primary">
+              <div
+                aria-hidden="true"
+                className="flex h-24 w-24 items-center justify-center rounded-full bg-primary/15 font-[family-name:var(--font-display)] text-4xl font-bold text-primary"
+              >
                 {profile.displayName[0]?.toUpperCase()}
               </div>
               <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full border border-primary/40 bg-background px-2 py-0.5 text-[10px] font-bold text-primary">
@@ -81,7 +84,10 @@ export default function ProfilePage() {
                   </span>
                   <span>next: LVL {profile.level + 1}</span>
                 </div>
-                <Progress value={(profile.xpIntoLevel / profile.xpForNextLevel) * 100} />
+                <Progress
+                  value={(profile.xpIntoLevel / profile.xpForNextLevel) * 100}
+                  aria-label={`Level ${profile.level} progress`}
+                />
               </div>
             </div>
             <div className="text-center">
@@ -103,7 +109,7 @@ export default function ProfilePage() {
           label="Day streak"
           value={
             <span className="flex items-center justify-center gap-1">
-              <Flame className="h-4 w-4 text-loss" /> {profile.currentStreak}
+              <Flame className="h-4 w-4 text-loss" aria-hidden="true" /> {profile.currentStreak}
             </span>
           }
         />
@@ -147,15 +153,17 @@ export default function ProfilePage() {
               {achievements.map((a) => (
                 <div
                   key={a.id}
+                  aria-label={`${a.name}${a.unlockedAt ? "" : " (locked)"}: ${a.description}`}
                   className={cn(
                     "rounded-xl border p-3 transition-colors",
                     a.unlockedAt
                       ? "border-gold/30 bg-gold/5"
                       : "border-border bg-surface opacity-45",
                   )}
-                  title={a.description}
                 >
-                  <span className="text-2xl">{a.icon}</span>
+                  <span aria-hidden="true" className="text-2xl">
+                    {a.icon}
+                  </span>
                   <p className="mt-1.5 text-sm font-semibold">{a.name}</p>
                   <p className="mt-0.5 line-clamp-2 text-xs text-muted">{a.description}</p>
                 </div>
@@ -229,7 +237,12 @@ function RatingSparkline({ points }: { points: RatingPointDto[] }) {
 
   return (
     <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-36 w-full min-w-[320px]">
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        role="img"
+        aria-label={`Rating history from ${min} to ${max}, currently ${values[values.length - 1]}`}
+        className="h-36 w-full min-w-[320px]"
+      >
         <defs>
           <linearGradient id="rating-fill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.25" />

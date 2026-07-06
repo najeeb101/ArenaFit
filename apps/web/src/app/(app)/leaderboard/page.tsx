@@ -65,12 +65,13 @@ function Board({ board }: { board: "global" | "weekly" }) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <ol className="flex flex-col gap-2">
       {entries.map((e, i) => {
         const isYou = e.userId === userId;
         return (
-          <motion.div
+          <motion.li
             key={e.userId}
+            aria-label={`Rank ${e.rank}: ${e.displayName}, ${e.rating} rating${isYou ? " (you)" : ""}`}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: Math.min(i * 0.03, 0.5) }}
@@ -82,6 +83,7 @@ function Board({ board }: { board: "global" | "weekly" }) {
             )}
           >
             <span
+              aria-hidden="true"
               className={cn(
                 "w-8 text-center font-[family-name:var(--font-display)] text-lg font-bold",
                 e.rank === 1 && "text-gold",
@@ -92,7 +94,10 @@ function Board({ board }: { board: "global" | "weekly" }) {
             >
               {e.rank === 1 ? <Crown className="mx-auto h-5 w-5" /> : e.rank}
             </span>
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 font-bold text-primary">
+            <div
+              aria-hidden="true"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 font-bold text-primary"
+            >
               {e.displayName[0]?.toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
@@ -116,9 +121,9 @@ function Board({ board }: { board: "global" | "weekly" }) {
                 </p>
               )}
             </div>
-          </motion.div>
+          </motion.li>
         );
       })}
-    </div>
+    </ol>
   );
 }

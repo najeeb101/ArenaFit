@@ -70,7 +70,11 @@ export default function LoginPage() {
                 required
               />
             </div>
-            {error && <p className="text-sm text-loss">{error}</p>}
+            {error && (
+              <p role="alert" className="text-sm text-loss">
+                {error}
+              </p>
+            )}
             <Button type="submit" size="lg" disabled={loading} className="mt-2">
               {loading ? "Logging in…" : "Log in"}
             </Button>
