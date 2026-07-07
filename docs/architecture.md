@@ -3,9 +3,13 @@
 ## Overview
 
 ArenaFit is a mobile-first web app for live 1v1 fitness battles with AI rep counting.
-Milestone 1 (this codebase) ships the full core loop against a **simulated opponent**:
-real camera + on-device pose tracking, a server-authoritative match engine, Elo
-ratings, XP/levels/coins, achievements, streaks, and leaderboards.
+Milestone 1 ships the full core loop against a **simulated opponent** via public
+matchmaking: real camera + on-device pose tracking, a server-authoritative match
+engine, Elo ratings, XP/levels/coins, achievements, streaks, and leaderboards.
+On top of that, **private rooms already give real human-vs-human matches** —
+a shareable invite code pairs two real players through the same match engine
+(no bot involved); public matchmaking against another human still needs the
+Redis-backed queue described in the roadmap below.
 
 ```
 ┌─────────────────────────────┐         REST (JWT)          ┌──────────────────────────┐
@@ -45,8 +49,11 @@ only server-side, inside one Prisma transaction.
 **The simulated opponent speaks the same protocol a human would.** The bot is a
 persona (name/rating/tier near the player's rating) plus a pre-generated rep
 schedule (base cadence × skill factor × fatigue × jitter). The gateway replays
-it through the same `score:update` events. Milestone 2 replaces the bot with a
-second socket in the same room — the battle client does not change.
+it through the same `score:update` events. A match's participants are modeled
+generically (`Participant`, a human-or-bot union in `match-engine.service.ts`)
+rather than special-casing the bot, so private rooms just create two
+`HumanParticipant`s instead of one — the battle client does not change either
+way.
 
 **Match state is in-memory for M1.** One API node holds active matches in a
 `Map`. This is deliberate: no Redis dependency until multi-node matchmaking
@@ -67,10 +74,35 @@ To switch to production-parity infra:
 3. Set `DATABASE_URL="postgresql://arenafit:arenafit@localhost:5432/arenafit"`.
 4. `pnpm --filter @arenafit/api exec prisma migrate dev` (fresh migration history).
 
+## Deployment
+
+- **API** (`apps/api/Dockerfile`): multi-stage build, `prisma migrate deploy`
+  runs on container start before the server boots. Needs `DATABASE_URL`
+  pointed at a real Postgres instance (SQLite is dev-only) plus the JWT
+  secrets — see `.env.example`.
+- **Web** (`apps/web/Dockerfile`): plain `next start`, not standalone output —
+  standalone's build-time symlink tracing fails on Windows without Developer
+  Mode, so this trades a larger image for zero platform-specific risk.
+  `NEXT_PUBLIC_API_URL` is a *build-time* arg (inlined into the client
+  bundle), not a runtime env var.
+- Vercel is the intended target for web (`apps/web/vercel.json`, project
+  "Root Directory" = `apps/web`); the API needs a host that runs a
+  long-lived process for Socket.IO, not serverless functions (Fly.io,
+  Railway, Render, or a VPS via `docker-compose.yml`).
+- CI (`.github/workflows/ci.yml`) builds and pushes both images to GHCR on
+  every push to `main`, after lint/typecheck/build/test all pass.
+- `docker compose up --build` runs the full stack (Postgres, Redis, api,
+  web) locally for testing the containerized path — day-to-day dev still
+  uses `pnpm dev` against SQLite.
+- None of the Dockerfiles have been verified with an actual `docker build`
+  in this environment (no Docker available) — CI's first run against them
+  is the first real test.
+
 ## Roadmap
 
-- **M2 — humans**: Redis-backed matchmaking queue, WebRTC P2P video (Socket.IO
-  signaling + coturn TURN), friends, private rooms, human rematches.
+- **M2 — humans**: Redis-backed public matchmaking queue (private rooms
+  already work without it), WebRTC P2P video (Socket.IO signaling groundwork
+  exists in `webrtc-relay.ts`; coturn TURN still needed for restrictive NATs).
 - **M3 — meta**: tournaments (bracket engine), seasons + rating resets, battle
   pass, weekly missions, cosmetics shop (coins sink).
 - **M4 — scale & product**: LLM AI coach on match telemetry, advanced anti-cheat

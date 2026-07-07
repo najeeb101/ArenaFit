@@ -6,9 +6,10 @@ Live 1v1 fitness battles in the browser: get matched, turn on your camera, and
 out-rep your opponent while AI counts every clean rep. Elo ranked ladder,
 XP/levels/coins, achievements, daily streaks, leaderboards.
 
-Milestone 1 ships the full core loop against a simulated opponent (real
-human-vs-human WebRTC battles are Milestone 2 — see
-[docs/architecture.md](docs/architecture.md)).
+Milestone 1 ships the full core loop against a simulated opponent, plus real
+human-vs-human matches via private rooms (share a code, no bot involved).
+Public matchmaking against a human, and WebRTC video, are Milestone 2 — see
+[docs/architecture.md](docs/architecture.md).
 
 ## Stack
 
@@ -46,7 +47,18 @@ opponent scores live.
 | `pnpm db:migrate` / `db:seed` | Prisma migrate / seed |
 | `pnpm lint` / `pnpm typecheck` | Lint / typecheck both apps |
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs lint, typecheck, build, and test on every push/PR to `main`.
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs lint, typecheck, build, and test on every push/PR to `main`, then builds and pushes both Docker images to GHCR on push to `main`.
+
+## Deploy
+
+```bash
+docker compose up --build   # full stack: postgres, redis, api, web
+```
+
+Web targets Vercel (`apps/web/vercel.json`, Root Directory = `apps/web`); the
+API needs a host that keeps a process alive for Socket.IO (Fly.io, Railway,
+Render, or the Dockerfile on any VPS) — see
+[docs/architecture.md#deployment](docs/architecture.md#deployment).
 
 ## Repo map
 

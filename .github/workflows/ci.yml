@@ -35,3 +35,51 @@ jobs:
 
       - name: Test
         run: pnpm turbo run test
+
+  # Builds & publishes both Docker images to GHCR after CI is green, so
+  # `main` always has a deployable image. Requires the repo's Actions
+  # settings to allow read-and-write workflow permissions (Settings ->
+  # Actions -> General -> Workflow permissions).
+  docker:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute lowercase image repo (Docker tags must be lowercase)
+        run: echo "REPO_LC=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ env.REPO_LC }}-api:latest
+            ghcr.io/${{ env.REPO_LC }}-api:${{ github.sha }}
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          # Set a NEXT_PUBLIC_API_URL repo variable once a staging API URL
+          # exists (Settings -> Secrets and variables -> Actions -> Variables).
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+          tags: |
+            ghcr.io/${{ env.REPO_LC }}-web:latest
+            ghcr.io/${{ env.REPO_LC }}-web:${{ github.sha }}

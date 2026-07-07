@@ -1,6 +1,10 @@
-# Production-parity infrastructure. Local dev currently runs on SQLite
-# (see docs/architecture.md "Dev infrastructure"); once Docker Desktop is
-# installed, start these and point DATABASE_URL / REDIS_URL at them.
+# Postgres + redis are provisioned for whenever the schema is cut over from
+# SQLite (see docs/architecture.md "Dev infrastructure" for that manual,
+# multi-step process — the current schema.prisma provider is still
+# "sqlite", so DATABASE_URL here can't point at postgres yet without that
+# cutover). The api/web services run the same SQLite setup as `pnpm dev`,
+# just containerized — useful for testing the Docker images themselves,
+# via `docker compose up --build`.
 services:
   postgres:
     image: postgres:16-alpine
@@ -27,6 +31,35 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      # SQLite, same as `pnpm dev` — matches schema.prisma's current
+      # provider. Ephemeral: lost on `docker compose down -v`. Repoint this
+      # at the postgres service above once the schema cutover is done.
+      DATABASE_URL: file:./dev.db
+      JWT_ACCESS_SECRET: dev-access-secret-change-me
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-me
+      CORS_ORIGIN: http://localhost:3000
+      PORT: 3001
+    ports:
+      - "3001:3001"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Reachable from the browser, not the compose network — the
+        # browser talks to the API directly, not through the web container.
+        NEXT_PUBLIC_API_URL: http://localhost:3001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
 
 volumes:
   pgdata:
